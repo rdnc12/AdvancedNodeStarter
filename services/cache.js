@@ -7,7 +7,7 @@ const client = redis.createClient(redisUrl);
 
 // instead of making a callback function
 // return a promise function
-client.get = util.promisify(client.get);
+client.hget = util.promisify(client.hget);
 
 // how query work
 // new query has 
@@ -15,19 +15,23 @@ client.get = util.promisify(client.get);
 // .exec (execute)
 // .limit ()
 
-// add additonal some logic
+
 const exec = mongoose.Query.prototype.exec;
 
 
 // to prevent working exec function when you called by
 // mongoose query. Because if we dont prevent, all data
 // will be in cache...
-mongoose.Query.prototype.cache = function() {
+mongoose.Query.prototype.cache = function(options = {}) {
     this.useCache = true;
+
+    // nested strategy (top level property)
+    this.hashKey = JSON.stringify(options.key || 'default');
     // chainable function call (example: .find().cache())
     return this;
 };
 
+// add additonal some logic
 mongoose.Query.prototype.exec = async function() {
     if (!this.useCache) {
         return exec.apply(this, arguments);
@@ -48,7 +52,7 @@ mongoose.Query.prototype.exec = async function() {
 
     // See if we have a value for 'key' in redis
 
-    const cacheValue = await client.get(key);
+    const cacheValue = await client.hget(this.hashKey, key);
 
     // If we do,return that
     if (cacheValue) {
@@ -73,6 +77,15 @@ mongoose.Query.prototype.exec = async function() {
 
     // .exec returns Mongoose Documents( so we make return result)
     // Redis handles JSON
-    client.get(key, JSON.stringify(result));
+    // cache expiration- nested strategy
+    client.hset(this.hashKey, key, JSON.stringify(result));
+
     return result;
+};
+
+module.exports = {
+    // delete posts
+    clearHash() {
+        client.del(JSON.stringify(hashKey));
+    }
 };
